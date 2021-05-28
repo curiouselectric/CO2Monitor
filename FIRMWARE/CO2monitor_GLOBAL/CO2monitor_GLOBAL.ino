@@ -1,8 +1,13 @@
 /*
-   Some links:
-    https://www.hackster.io/kritch83/getting-started-with-the-mh-z14a-co2-detector-e96234
-  This sketch demonstrates the capabilities of the pubsub library in combination
-  with the ESP8266 board/library.
+   CO2 Monitor for the ESP8266
+
+   Written by: Matt Little (based on lots of other peoples work!)
+   Date: Around May 2021
+   Feel free to share, but please with accreditation.
+
+
+  This unit reads a serial conencted CO2 sensor (see instructions for wiring)
+
 
   It connects to WiFi (or creates a hotspot to enter in the Wifi credentials if needed)
 
@@ -16,19 +21,23 @@
   reconnect function. See the 'mqtt_reconnect_nonblocking' example for how to
   achieve the same result without blocking the main loop.
 
+  This sketch demonstrates the capabilities of the pubsub library in combination
+  with the ESP8266 board/library.
+
   To install the ESP8266 board, (using Arduino 1.6.4+):
   - Add the following 3rd party board manager under "File -> Preferences -> Additional Boards Manager URLs":
        http://arduino.esp8266.com/stable/package_esp8266com_index.json
   - Open the "Tools -> Board -> Board Manager" and click install for the ESP8266"
-  - Select your ESP8266 in "Tools -> Board"
+  - Select your ESP8266 in "Tools -> Board" (Use: "NodeMCU 1.0 (ESP-12E Module)")
 
   You need to include the following libraries, via the library manager in Arduino
-    WiFiManager (v 0.15.0) by tzapu
-    Adafruit_NeoPixel by Adafruit
-    Adafruit_MQTT_Library by Adafruit
-    U8g2 by Oliver
-    Button2 by Lennart Hennings
-    ESP Rotary by Lennart Hennings
+    WiFiManager (v 0.15.0)  by tzapu
+    Adafruit_NeoPixel       by Adafruit
+    Adafruit_MQTT_Library   by Adafruit
+    U8g2                    by Oliver
+    Button2                 by Lennart Hennings
+    ESP Rotary              by Lennart Hennings
+    ArduinoJson             V6.0 https://arduinojson.org/ or install via Arduino library manager
 
   DONE:
   Wifi connection - show IP and SSID and PW - DONE 19/5/2021
@@ -36,19 +45,21 @@
   Colours for LEDs Green->yellow->red - DONE 19/5/2021. Configuable?
   Get Adafriut IO details in config screen via wifi - DONE 22/5/2021
   Create AP after long press and hold of the encoder - to adjust ADAFRUIT IO Settings - DONE 22/5/2021
+  WDT to reset if no MQTT? OR need to handle this error if it happens. - Sorted 28/5/2021
+  Lights On or Off - Sorted 28/5/2021
 
-  TO DO:
-  WDT to reset if no MQTT? OR need to handle this error if it happens.
+  TO DO
   Rate of change of data? - display this?
   Integral of the data?
-  Warm up task bar fill
-  Lights On or Off
+  Warm up task bar fill - Not needed
+
+  Interesting links:
+    https://www.hackster.io/kritch83/getting-started-with-the-mh-z14a-co2-detector-e96234
 
 */
 
 // Config.h includes all the hardware and defines for the board
 #include "Config.h"
-
 #include "Wire.h"     // This is also needed for the OLED screen
 
 #include <SoftwareSerial.h>
@@ -104,13 +115,12 @@ WiFiClientSecure client;
 // Setup the MQTT client class by passing in the WiFi client and MQTT server and login details.
 Adafruit_MQTT_Client mqtt(&client, AIO_SERVER, AIO_SERVERPORT, AIO_USERNAME, AIO_KEY);
 // io.adafruit.com SHA1 fingerprint
-//static const char *fingerprint PROGMEM = "77 00 54 2D DA E7 D8 03 27 31 23 99 EB 27 DB CB A5 4C 57 18";
 static const char *fingerprint PROGMEM = "59 3C 48 0A B1 8B 39 4E 0D 58 50 47 9A 13 55 60 CC A0 1D AF";
 
 /******************** Sketch Code ************************************/
 
 byte displayMode = 100;    // Holds the page to display - Start in Start-up screen
-byte maxDisplayMode = 2 + (NUMBER_SENSORS * 4); // Roll around the modes Main screen (1) plus 2 for each sensor
+byte maxDisplayMode = 2 + (NUMBER_SENSORS * 8); // Roll around the modes Main screen (1) plus 7 for each sensor (all the options)
 
 bool updateMQTTflag = false;
 
@@ -163,10 +173,11 @@ String Router_Pass;
 uint32_t x = 0;
 float value = 0.0;  // Holds the temperature value to display and to send to AdafruitIO
 
-//flag for saving data
-bool shouldSaveConfig = false;
+bool shouldSaveConfig = false;      //flag for saving data
+bool lights_on_flag = true;         // This controls if the lights are on or off. Start ON.
+bool adjust_settings_flag = false;  // This lets us enter an adjustment mode
 
-bool lights_on_flag = true; // This controls if the lights are on or off. Start ON.
+float ROC_previous_value = 0;           // Holds the previous CO2 data for doing rate of change calculations
 
 //callback notifying us of the need to save config
 void saveConfigCallback ()
@@ -178,7 +189,7 @@ void saveConfigCallback ()
 void setup()
 {
   Serial.begin(115200);
-  EEPROM.begin(10);
+  EEPROM.begin(100);
 
   pixels.begin();
   pixels.clear(); // Set all pixel colors to 'off'
@@ -190,6 +201,9 @@ void setup()
 
   // Show display
   updateScreen(displayMode, wificonnect, mqttconnect);
+
+  pixels.clear(); // Set all pixel colors to 'off'
+  pixels.show();   // Send the updated pixel colors to the hardware.
 
   // ******** Sort out stored data from SPIFFS *********
   // From: https://randomnerdtutorials.com/wifimanager-with-esp8266-autoconnect-custom-parameter-and-manage-your-ssid-and-password/
@@ -253,6 +267,12 @@ void setup()
   // Want to warm up the sensor - takes 5 mins (300 seconds) or so!!
   Serial.print("Warming up");
 
+  // Read in the various values for min and max settings. Need 4 bytes for each of these: floats.
+  EEPROM.get(2, WARM_UP_TIME);
+  EEPROM.get(10, co2High);
+  EEPROM.get(20, co2Low);
+  EEPROM.get(30, co2IntegralMax);
+
   pixels.clear(); // Set all pixel colors to 'off'
   pixels.show();   // Send the updated pixel colors to the hardware.
 
@@ -312,7 +332,6 @@ void setup_wifi(bool start_AP) {
 
     //it starts an access point
     //and goes into a blocking loop awaiting configuration
-    //if (!wifiManager.startConfigPortal(AP_SSID.c_str(), AP_PASS.c_str()))
     if (!wifiManager.startConfigPortal(AP_SSID, AP_PASS))
     {
       Serial.println("Not connected to WiFi but continuing anyway.");
@@ -374,7 +393,7 @@ void loop() {
     {
       Serial.println("Warm!!!");
       warmUpFlag = false;
-      displayMode = EEPROM.read(10);  // After showing - update to mode
+      displayMode = EEPROM.read(1);  // After showing - update to mode
     }
     // Keep the LEDs OFF:
     pixels.clear(); // Set all pixel colors to 'off'
@@ -452,7 +471,7 @@ void loop() {
     /************* Feeds for Adafruit IO *********************************/
     // Setup a feed called 'test' for publishing.
     // Notice MQTT paths for AIO follow the form: <username>/feeds/<feedname>
-    //Adafruit_MQTT_Publish fermenterTemp = Adafruit_MQTT_Publish(&mqtt, AIO_USERNAME "/feeds/fermenterTemp");
+    //eg: Adafruit_MQTT_Publish fermenterTemp = Adafruit_MQTT_Publish(&mqtt, AIO_USERNAME "/feeds/fermenterTemp");
 
     char feed_name[80];  // =   AIO_USERNAME  "/feeds/airC02" ;
     strcpy(feed_name, AIO_USERNAME);
@@ -658,12 +677,89 @@ void updateScreen(int _mode, bool _wificonnect, bool _mqttconnect)
       // This is the case when undefined at start
       u8g2.setCursor(0, 10);
       u8g2.print(F("RATE OF CHANGE"));
+
+      //      updateROC(ROC_previous_value, co2ppm);
+      //      ROC_previous_value=co2ppm;
+      checkLEDs(co2ppm, co2High, co2Low);
       break;
 
     case 6:
       // This is the case when undefined at start
       u8g2.setCursor(0, 10);
       u8g2.print(F("INTEGRAL"));
+      checkLEDs(co2ppm, co2High, co2Low);
+      break;
+
+    case 7:
+      // This is the case when undefined at start
+      u8g2.setCursor(0, 10);
+      u8g2.print(F("Adjust Min"));
+      u8g2.setCursor(0, 20);
+      u8g2.print(co2Low, 0);
+      u8g2.setCursor(0, 30);
+      if (adjust_settings_flag == false)
+      {
+        u8g2.print(F("Press to adjust"));
+      }
+      else
+      {
+        u8g2.print(F("Rotate to Adjust"));
+      }
+      checkLEDs(co2ppm, co2High, co2Low);
+      break;
+
+    case 8:
+      // This is the case when undefined at start
+      u8g2.setCursor(0, 10);
+      u8g2.print(F("Adjust Max"));
+      u8g2.setCursor(0, 20);
+      u8g2.print(co2High, 0);
+      u8g2.setCursor(0, 30);
+      if (adjust_settings_flag == false)
+      {
+        u8g2.print(F("Press to adjust"));
+      }
+      else
+      {
+        u8g2.print(F("Rotate to Adjust"));
+      }
+      checkLEDs(co2ppm, co2High, co2Low);
+      break;
+
+    case 9:
+      // This is the case when undefined at start
+      u8g2.setCursor(0, 10);
+      u8g2.print(F("Adjust Integral"));
+      u8g2.setCursor(0, 20);
+      u8g2.print(co2IntegralMax, 0);
+      u8g2.setCursor(0, 30);
+      if (adjust_settings_flag == false)
+      {
+        u8g2.print(F("Press to adjust"));
+      }
+      else
+      {
+        u8g2.print(F("Rotate to Adjust"));
+      }
+      checkLEDs(co2ppm, co2High, co2Low);
+      break;
+
+    case 10:
+      // This is the case when undefined at start
+      u8g2.setCursor(0, 10);
+      u8g2.print(F("Warm Up Time:"));
+      u8g2.setCursor(0, 20);
+      u8g2.print(WARM_UP_TIME, 0);
+      u8g2.setCursor(0, 30);
+      if (adjust_settings_flag == false)
+      {
+        u8g2.print(F("Press to adjust"));
+      }
+      else
+      {
+        u8g2.print(F("Rotate to Adjust"));
+      }
+      checkLEDs(co2ppm, co2High, co2Low);
       break;
 
     case 98:
@@ -671,15 +767,15 @@ void updateScreen(int _mode, bool _wificonnect, bool _mqttconnect)
       // Displays this screen for a bit!
       u8g2.setCursor(0, 10);
       u8g2.print(F("LIGHTS UPDATED"));
-      displayMode = EEPROM.read(10);  // After showing - update to mode
+      displayMode = EEPROM.read(1);  // After showing - update to mode
       break;
 
     case 99:
       // This is the case when the EEPROM has been saved
       // Displays this screen for a bit!
       u8g2.setCursor(0, 10);
-      u8g2.print(F("MODE SAVED!"));
-      displayMode = EEPROM.read(10);  // After showing - update to mode
+      u8g2.print(F("SAVED!"));
+      displayMode = EEPROM.read(1);  // After showing - update to mode
       break;
 
     case 100:
@@ -723,7 +819,7 @@ void checkLEDs(float _temp, float _tempHigh, float _tempLow)
 {
   // We dont want to show any LEDs is the light flag is false:
 
-  if (lights_on_flag==false)
+  if (lights_on_flag == false)
   {
     pixels.clear(); // Set all pixel colors to 'off'
     pixels.show();   // Send the updated pixel colors to the hardware.
@@ -761,6 +857,7 @@ void checkLEDs(float _temp, float _tempHigh, float _tempLow)
   }
 }
 
+
 // ****** ENCODER & BUTTON FUNCTIONS *****************
 // on change of encoder
 void rotate(ESPRotary & r)
@@ -773,18 +870,90 @@ void rotate(ESPRotary & r)
   }
   if (r.directionToString(r.getDirection()) == "RIGHT")
   {
-    displayMode++;
-    if (displayMode > maxDisplayMode)
+    if (adjust_settings_flag == false)
     {
-      displayMode = 1;
+      displayMode++;
+      if (displayMode > maxDisplayMode)
+      {
+        displayMode = 1;
+      }
+    }
+    else
+    {
+      if (displayMode == 7)
+      {
+        co2Low = co2Low + INC_VALUE;
+        if (co2Low > MAX_VALUE)
+        {
+          co2Low = MAX_VALUE;
+        }
+      }
+      if (displayMode == 8)
+      {
+        co2High = co2High + INC_VALUE;
+        if (co2High > MAX_VALUE)
+        {
+          co2High = MAX_VALUE;
+        }
+      }
+      if (displayMode == 9)
+      {
+        co2IntegralMax  = co2IntegralMax  + INC_VALUE;
+        if (co2IntegralMax > MAX_VALUE)
+        {
+          co2IntegralMax = MAX_VALUE;
+        }
+      }
+      if (displayMode == 10)
+      {
+        WARM_UP_TIME  = WARM_UP_TIME  + 1;
+      }
     }
   }
   else if (r.directionToString(r.getDirection()) == "LEFT")
   {
-    displayMode--;
-    if (displayMode <= 0)
+    if (adjust_settings_flag == false)
     {
-      displayMode = maxDisplayMode;
+      displayMode--;
+      if (displayMode <= 0)
+      {
+        displayMode = maxDisplayMode;
+      }
+    }
+    else
+    {
+      if (displayMode == 7)
+      {
+        co2Low =  co2Low - INC_VALUE;
+        if (co2Low <= 0)
+        {
+          co2Low = 0;
+        }
+      }
+      if (displayMode == 8)
+      {
+        co2High =  co2High - INC_VALUE;
+        if (co2High <= 0)
+        {
+          co2High = 0;
+        }
+      }
+      if (displayMode == 9)
+      {
+        co2IntegralMax  =  co2IntegralMax - INC_VALUE;
+        if (co2IntegralMax  <= 0)
+        {
+          co2IntegralMax  = 0;
+        }
+      }
+      if (displayMode == 10)
+      {
+        WARM_UP_TIME  = WARM_UP_TIME  - 1;
+        if (WARM_UP_TIME  <= 0)
+        {
+          WARM_UP_TIME = 0;
+        }
+      }
     }
   }
   updateScreen(displayMode, wificonnect, mqttconnect);
@@ -811,20 +980,34 @@ void longpress(Button2& btn)
     //Start the unit in AP mode
     setup_wifi(true);
   }
-  else if (time > 500)
+  else if (time > 300)
   {
     if (displayMode == 2)
     {
-      //Store starting displayMode to EEPROM with long press
-      EEPROM.write(10, displayMode);  // this writes a good value to it
-      EEPROM.commit();
       lights_on_flag = !lights_on_flag;
       displayMode = 98; // Show the 'lights' screen
     }
+    else if (displayMode == 7 || displayMode == 8 || displayMode == 9 || displayMode == 10 )
+    {
+      if (adjust_settings_flag == true)
+      {
+        // Save the values to EEPROM
+        EEPROM.put(10, co2Low);
+        EEPROM.put(20, co2High);
+        EEPROM.put(30, co2IntegralMax);
+        EEPROM.put(2, WARM_UP_TIME);
+        EEPROM.write(1, displayMode);  // this writes a good value to it
+        EEPROM.commit();
+        displayMode = 99;
+      }
+      adjust_settings_flag = !adjust_settings_flag;  // Toggle the adjustment flag
+      Serial.print(F("Adjust Flag = "));
+      Serial.println(adjust_settings_flag);
+    }
     else
     {
-      //Store starting displayMode to EEPROM with long press
-      EEPROM.write(10, displayMode);  // this writes a good value to it
+      //Store starting displayMode to EEPROM with press
+      EEPROM.write(1, displayMode);  // this writes a good value to it
       EEPROM.commit();
       if (DEBUG_SWITCH == true)
       {
@@ -848,24 +1031,47 @@ long int getReadings()
 {
   if (DEBUG_CO2 == true)
   {
-    Serial.println("Reading CO2 Sensor");
+    Serial.println(F("Reading CO2 Sensor"));
   }
-
   while (co2Serial.available())  // this clears out any garbage in the RX buffer
   {
     int garbage = co2Serial.read();
   }
+  if (DEBUG_CO2 == true)
+  {
+    Serial.println(F("Cleared Garbage"));
+    Serial.print(F("Wait for response"));
+  }
   co2Serial.write(cmd, 9);  // Sent out read command to the sensor
   co2Serial.flush();  // this pauses the sketch and waits for the TX buffer to send all its data to the sensor
+  int timeout = 0;
   while (!co2Serial.available())  // this pauses the sketch and waiting for the sensor responce
   {
-    delay(5);
+    timeout++;
+    delay(20);
+    if (DEBUG_CO2 == true)
+    {
+      Serial.print(F("."));
+    }
+    if (timeout > 50)
+    {
+      if (DEBUG_CO2 == true)
+      {
+        Serial.println();
+        Serial.print(F("ERROR: No response"));
+      }
+      return (0);
+    }
+  }
+  if (DEBUG_CO2 == true)
+  {
+    Serial.println();
+    Serial.print(F("Requesting Data"));
   }
   co2Serial.readBytes(response, 9);  // once data is avilable, it reads it to a variable
   int responseHigh  = (int)response[2];
   int responseLow   = (int)response[3];
   long int CO2ppmVALUE = (256 * responseHigh) + responseLow;
-
   if (DEBUG_CO2 == true)
   {
     Serial.print("Low: ");
