@@ -905,7 +905,7 @@ void rotate(ESPRotary & r)
       }
       if (displayMode == 10)
       {
-        WARM_UP_TIME  = WARM_UP_TIME  + 1;
+        WARM_UP_TIME  = WARM_UP_TIME  + 5;
       }
     }
   }
@@ -947,7 +947,7 @@ void rotate(ESPRotary & r)
       }
       if (displayMode == 10)
       {
-        WARM_UP_TIME  = WARM_UP_TIME  - 1;
+        WARM_UP_TIME  = WARM_UP_TIME  - 5;
         if (WARM_UP_TIME  <= 0)
         {
           WARM_UP_TIME = 0;

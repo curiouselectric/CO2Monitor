@@ -31,7 +31,7 @@ char            AIO_feed_name[AIO_feed_name_LEN]  = "YOUR FEED NAME";
 #define         DEBUG_GRAPH                true         // Show graph updates on serial
 #define         DEBUG_MQTT                 true         // Show MQTT updates on serial
 #define         DEBUG_ENCODER              false        // Show Encoder updates on serial
-#define         DEBUG_CO2                  true         // Show CO2 updates sensor on serial
+#define         DEBUG_CO2                  false         // Show CO2 updates sensor on serial
 #define         DEBUG_SWITCH               true         // Show switch debug info
 #define         DEBUG_CALIBRATE            true         // Show calibrate debug info
 
