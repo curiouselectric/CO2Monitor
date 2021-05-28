@@ -269,8 +269,8 @@ void setup()
 
   // Read in the various values for min and max settings. Need 4 bytes for each of these: floats.
   EEPROM.get(2, WARM_UP_TIME);
-  EEPROM.get(10, co2High);
-  EEPROM.get(20, co2Low);
+  EEPROM.get(10, co2Low);
+  EEPROM.get(20, co2High);
   EEPROM.get(30, co2IntegralMax);
 
   pixels.clear(); // Set all pixel colors to 'off'
@@ -856,7 +856,6 @@ void checkLEDs(float _temp, float _tempHigh, float _tempLow)
     pixels.show();
   }
 }
-
 
 // ****** ENCODER & BUTTON FUNCTIONS *****************
 // on change of encoder
