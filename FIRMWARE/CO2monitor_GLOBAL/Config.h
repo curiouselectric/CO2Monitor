@@ -37,10 +37,10 @@ char            AIO_feed_name[AIO_feed_name_LEN]  = "YOUR FEED NAME";
 
 float           co2High                    = 1400.0;    // a high PPM value
 float           co2Low                     = 800.0;     // a low PPM value
-float           co2IntegralMax             = 2160000.0;   // This is 1200 ppm for 30 min in terms of ppm S (1200 x 30 x 60 = 2160000)
+float           co2IntegralMax             = 0;         // This is 1200 ppm for 30 min in terms of ppm S (1200 x 30 x 60 = 2160000)
 #define         INC_VALUE                  50           // How much to increment the value each time
 #define         MAX_VALUE                  2000         // Maximum for the high/low values   
-
+#define         MAX_INTEGRAL_VALUE         5000         // Maximum for the integral
 
 const uint8_t   SW_TX                      = D1;    // For software serial
 const uint8_t   SW_RX                      = D2;    // For software serial

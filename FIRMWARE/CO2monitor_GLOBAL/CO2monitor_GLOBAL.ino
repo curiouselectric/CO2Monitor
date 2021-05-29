@@ -22,9 +22,13 @@
 
   It publishes the sensor values via MQTT to adafruit IO. You can input your user name, feed name and key in the WiFi set-up page.
 
-  It displays a graph of the last 100 values every 60 seconds updated.
+
   It shows the actual value (checked every 5 seconds or so).
+
+  It displays a graph of the last 100 values every 60 seconds updated.
+
   It can also show the rate of change (difference between last value and this. This can be useful for showing how quickly things are changing.
+
   It can also show the integral of CO2 level over time. This can be used to figure out to ventilate or not. It multiplies the CO2 reading by the time interval.
   So for integral we have
 
@@ -173,12 +177,9 @@ float co2Buffer[sizeOfBuffer];  // Sets up a buffer of floats for displaying dat
 int   startx = 2;                         // For drawing the graphs (bottom left corner)
 int   starty = 46;                        // For drawing the graphs (bottom left corner)
 float graphHeight = 30.0;                 // Height of graph (its 120 pixels wide, 64 pixels high)
-float graphHeightMaxValue = 30.0;         // Temp Graph Maximum of the int values to be displayed
-float graphHeightMinValue = 10.0;         // Temp Graph Minimum of the int values to be displayed
-float graphCO2HeightMaxValue = 1800;      // PM2.5 Graph Maximum of the int values to be displayed
-float graphCO2HeightMinValue = 350;       // PM2.5 Graph Minimum of the int values to be displayed
-
-float graphCalculatedY;   // for doing calculations
+float graphCO2HeightMaxValue = 1800;      // CO2 Graph Maximum of the int values to be displayed
+float graphCO2HeightMinValue = 350;       // CO2 Graph Minimum of the int values to be displayed
+float graphCalculatedY;                   // for doing graph calculations
 
 ESPRotary r = ESPRotary(ROT_A_PIN2, ROT_B_PIN2, (int)4);
 Button2 b = Button2(ROT_PUSH_PIN2, INPUT_PULLUP, false, false);
@@ -196,8 +197,10 @@ bool shouldSaveConfig = false;      //flag for saving data
 bool lights_on_flag = true;         // This controls if the lights are on or off. Start ON.
 bool adjust_settings_flag = false;  // This lets us enter an adjustment mode
 
-float ROC_previous_value = 0;       // Holds the previous CO2 data for doing rate of change calculations
-float ROC_value = 0;                // Holds the rate of change value. If > 100 then large, if > 50 then medium, if > 10 then small, if < 10 then very low
+float ROC_previous_value  = 0;       // Holds the previous CO2 data for doing rate of change calculations
+float ROC_value           = 0;       // Holds the rate of change value. If > 100 then large, if > 50 then medium, if > 10 then small, if < 10 then very low
+float integral_value      = 0;       // This holds the intergal value.
+int   percentage          = 0;       // Holds the percentage of the integral calculation
 
 //callback notifying us of the need to save config
 void saveConfigCallback ()
@@ -576,7 +579,8 @@ void warmupTimerScreen(int _warmupTimeS, bool _wificonnect, bool _mqttconnect)
   u8g2.print(F("WARMING UP"));
   u8g2.setCursor(100, 10);
   u8g2.print(_warmupTimeS);
-
+  u8g2.setCursor(0, 20);
+  u8g2.print(F("Long press to cancel"));
   // This section draws the bit at the botoom (always there)
   if (_wificonnect == true)
   {
@@ -636,14 +640,9 @@ float updateROC(float _ROC_previous_value, float _co2ppm)
   {
     u8g2.drawTriangle(14, 12, 110, 12, 64, 50);
   }
-
   return (_ROC_value);
 }
 
-float updateIntegral(float _integral_value, float _co2ppm)
-{
-  return (_integral_value);
-}
 
 void updateScreen(int _mode, bool _wificonnect, bool _mqttconnect)
 {
@@ -688,6 +687,8 @@ void updateScreen(int _mode, bool _wificonnect, bool _mqttconnect)
         }
         pixels.show();
       }
+      u8g2.setCursor(0, 20);
+      u8g2.print(F("Press to change"));
       break;
 
     case 3:
@@ -704,7 +705,7 @@ void updateScreen(int _mode, bool _wificonnect, bool _mqttconnect)
       u8g2.print(F("CO2:"));
       // Want to adjust the font here:
       u8g2.setFont(CBOLED_MESSAGE_FONT_24PT);  // choose a suitable font
-      u8g2.setCursor(38, 50);
+      u8g2.setCursor(32, 50);
       dtostrf(co2ppm, 3, 0, _buffer);  // 0 DP
       u8g2.print(_buffer);
       u8g2.setFont(CBOLED_MESSAGE_FONT_8PT);  // Font back to normal!
@@ -735,37 +736,78 @@ void updateScreen(int _mode, bool _wificonnect, bool _mqttconnect)
         }
         u8g2.drawLine(startx + n, starty, startx + n, (int)graphCalculatedY);
       }
+      // Also add two lines - one for the min and one for the max:
+      // Draw min line
+      u8g2.drawLine(startx , starty - (int)(((co2Low - graphCO2HeightMinValue) / graphCO2HeightMaxValue)*graphHeight), startx + sizeOfBuffer, starty - (int)(((co2Low - graphCO2HeightMinValue) / graphCO2HeightMaxValue)*graphHeight));
+      // Draw max line
+      u8g2.drawLine(startx , starty - (int)(((co2High - graphCO2HeightMinValue) / graphCO2HeightMaxValue)*graphHeight), startx + sizeOfBuffer, starty - (int)(((co2High - graphCO2HeightMinValue) / graphCO2HeightMaxValue)*graphHeight));
+
       checkLEDs(co2ppm, co2High, co2Low);
       break;
 
     case 5:
-      // This is the case when undefined at start
+      // This is the case for Rate of Change
       u8g2.setCursor(0, 10);
-      u8g2.print(F("CHANGE:"));
-      ROC_value = updateROC(ROC_previous_value, co2ppm);
+      u8g2.print(F("PPM:"));
+      u8g2.setCursor(32, 10);
+      u8g2.print(co2ppm, 0);
       u8g2.setCursor(64, 10);
+      u8g2.print(F("DIFF:"));
+      ROC_value = updateROC(ROC_previous_value, co2ppm);
+      u8g2.setCursor(92, 10);
       u8g2.print(ROC_value, 0);
       checkLEDs(co2ppm, co2High, co2Low);
       ROC_previous_value = co2ppm;
       break;
 
     case 6:
-      // This is the case when undefined at start
+      // This is the case for the Integral display
       u8g2.setCursor(0, 10);
-      u8g2.print(F("INTEGRAL"));
+      u8g2.print(F("PPM:"));
+      u8g2.setCursor(32, 10);
+      u8g2.print(co2ppm, 0);
+      u8g2.setCursor(64, 10);
+      u8g2.print(F("INT:"));
 
+      // co2IntegralMax - This is a value of ppm x seconds eg: 1200 ppm for 30 min = 1200 x 30 x 60 = 2160000
+      // it has a multipler of 1000, to make the values more managable.
+      // Maximum value is 5000 x 1000 = 5000000 = 1000ppm for 83 mins.
+      // There are:DISPLAY_UPDATE time in mS between the readings (approx!)
+      integral_value = integral_value + (((co2ppm * (float)DISPLAY_UPDATE) / 1000.0) / 1000.0);
 
-
-      // Want the LEDs to go red when integral is HIGH
-
-      float _integral_value;   // This holds if the lights should be green, yellow or red - not on high or low this time
       // If integral <50% the green, if <100% then yellow if >100% then red
+      // Draws a status bar at position _x, _y with _height and _width.
+      // This is filled up to _progrss (a percent value from 0-100)
+      u8g2.drawFrame(10, 25, 100, 10);
+      percentage = (int)((integral_value / co2IntegralMax) * (float)100);
+      if (percentage >= 100)
+      {
+        percentage = 100; // Stops graph going off the scale.
+      }
 
-      checkLEDs(_integral_value, co2High, co2Low);
+      if (percentage > 0)
+      {
+        u8g2.drawBox(10, 25, percentage, 10);
+      }
+      u8g2.setCursor(88, 10);
+      u8g2.print(integral_value, 0);
+
+      if (percentage <= 50)
+      {
+        checkLEDs(co2Low - 10, co2High, co2Low);
+      }
+      else if (percentage < 100)
+      {
+        checkLEDs(co2Low + 10, co2High, co2Low);
+      }
+      else if (percentage >= 100)
+      {
+        checkLEDs(co2High + 10, co2High, co2Low);
+      }
       break;
 
     case 7:
-      // This is the case when undefined at start
+      // This is the case for adjusting the minimum
       u8g2.setCursor(0, 10);
       u8g2.print(F("Adjust Min"));
       u8g2.setCursor(0, 20);
@@ -783,7 +825,7 @@ void updateScreen(int _mode, bool _wificonnect, bool _mqttconnect)
       break;
 
     case 8:
-      // This is the case when undefined at start
+      // This is the case for adjusting the maximum
       u8g2.setCursor(0, 10);
       u8g2.print(F("Adjust Max"));
       u8g2.setCursor(0, 20);
@@ -801,7 +843,7 @@ void updateScreen(int _mode, bool _wificonnect, bool _mqttconnect)
       break;
 
     case 9:
-      // This is the case when undefined at start
+      // This is the case for adjusting the max integral value
       u8g2.setCursor(0, 10);
       u8g2.print(F("Adjust Integral"));
       u8g2.setCursor(0, 20);
@@ -981,9 +1023,9 @@ void rotate(ESPRotary & r)
       if (displayMode == 9)
       {
         co2IntegralMax  = co2IntegralMax  + INC_VALUE;
-        if (co2IntegralMax > MAX_VALUE)
+        if (co2IntegralMax > MAX_INTEGRAL_VALUE)
         {
-          co2IntegralMax = MAX_VALUE;
+          co2IntegralMax = MAX_INTEGRAL_VALUE;
         }
       }
       if (displayMode == 10)
