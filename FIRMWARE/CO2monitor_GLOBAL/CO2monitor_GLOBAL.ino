@@ -3,25 +3,44 @@
 
    Written by: Matt Little (based on lots of other peoples work!)
    Date: Around May 2021
-   Feel free to share, but please with accreditation.
+   Feel free to share, but please with accreditation to me and the others who helped provide libraries with this.
 
+  This unit reads a serial conencted CO2 sensor (see instructions for wiring).
+  CO2 sensor is a MH-Z14A CO2 Sensor. (https://www.winsen-sensor.com/sensors/co2-sensor/mh-z14a.html)
+  It displays the CO2 level in PPM via a 9600 baud serial interface.
+  It should have at least 3 mins (180 seconds) of warm up time for accurate results.
+  It may also need calibration with a knwon value. This is not yet implemented, so realtive changes are the most interesting thing at the moment.
 
-  This unit reads a serial conencted CO2 sensor (see instructions for wiring)
+  It connects to WiFi (or creates a hotspot to enter in the Wifi credentials if needed).
+  If no wifi credentials saved then, after 20 seconds, it will just act as CO2 monitor, with no upload.
 
+  You can put the unit into Access Point (AP) mode by (once warmed up!) by pressing and holding the botton on the from (push the dial) for at least 2 seconds.
+  This will create an AP with name CO2MONITOR and password "password". These can be adjusted in the config file.
+  Connect to this AP and go to the browser and go to 192.168. 4.1  (the default IP address). It may do this automatically depending upon your computer.
+  Add your Wifi SSID and Password. This will be stored in memory for next time. You can also put in your Adafruit IO User name, Key and Feed name.
+  Click 'Save' and the unit should restart.
 
-  It connects to WiFi (or creates a hotspot to enter in the Wifi credentials if needed)
+  It publishes the sensor values via MQTT to adafruit IO. You can input your user name, feed name and key in the WiFi set-up page.
 
-  It displays the CO2 level in PPM
+  It displays a graph of the last 100 values every 60 seconds updated.
+  It shows the actual value (checked every 5 seconds or so).
+  It can also show the rate of change (difference between last value and this. This can be useful for showing how quickly things are changing.
+  It can also show the integral of CO2 level over time. This can be used to figure out to ventilate or not. It multiplies the CO2 reading by the time interval.
+  So for integral we have
 
-  It publishes the sensor values via MQTT to tadafruit IO in this example.
+  Max and Min for the lights can be set. (Green below min, Yellow between min and max, Red over max).
+  The integral for setting a warning (red light) can also be adjusted.
+  These are saved in EEPROM.
+  The Warm up time can also be set, but it is recommended this is >180 seconds.
+  If you want to cancel the warm up, then press and hold the button druing warm up and it will start up.
 
-  CO2 sensor is a MH-Z14A CO Sensor.
+  Lights can be switch on or off, depending on teh application.
 
   It will reconnect to the server if the connection is lost using a blocking
   reconnect function. See the 'mqtt_reconnect_nonblocking' example for how to
   achieve the same result without blocking the main loop.
 
-  This sketch demonstrates the capabilities of the pubsub library in combination
+  This sketch demonstrates the capabilities of the pubsub library (MQTT) in combination
   with the ESP8266 board/library.
 
   To install the ESP8266 board, (using Arduino 1.6.4+):
@@ -177,7 +196,8 @@ bool shouldSaveConfig = false;      //flag for saving data
 bool lights_on_flag = true;         // This controls if the lights are on or off. Start ON.
 bool adjust_settings_flag = false;  // This lets us enter an adjustment mode
 
-float ROC_previous_value = 0;           // Holds the previous CO2 data for doing rate of change calculations
+float ROC_previous_value = 0;       // Holds the previous CO2 data for doing rate of change calculations
+float ROC_value = 0;                // Holds the rate of change value. If > 100 then large, if > 50 then medium, if > 10 then small, if < 10 then very low
 
 //callback notifying us of the need to save config
 void saveConfigCallback ()
@@ -275,6 +295,8 @@ void setup()
 
   pixels.clear(); // Set all pixel colors to 'off'
   pixels.show();   // Send the updated pixel colors to the hardware.
+
+  displayCounterTime = millis(); // Ready for displaying info
 
 }
 
@@ -382,14 +404,13 @@ void loop() {
   {
     // In this case we want to warm up the sensor.
     warmUpCounter++;
-    delay(1000);   // 1 second wait
+    delay(100);   // 1 second wait
     r.loop();
     b.loop();
     Serial.print(".");
     // Update the display with a count down timer:
-    warmupTimerScreen((WARM_UP_TIME - warmUpCounter + 1), wificonnect, mqttconnect);
-
-    if (warmUpCounter > WARM_UP_TIME)
+    warmupTimerScreen(((WARM_UP_TIME) - (warmUpCounter / 10)), wificonnect, mqttconnect);
+    if (warmUpCounter > (WARM_UP_TIME * 10))
     {
       Serial.println("Warm!!!");
       warmUpFlag = false;
@@ -580,6 +601,50 @@ void warmupTimerScreen(int _warmupTimeS, bool _wificonnect, bool _mqttconnect)
   u8g2.sendBuffer();  // Write all the display data to the screen
 }
 
+float updateROC(float _ROC_previous_value, float _co2ppm)
+{
+  float _ROC_value = _co2ppm - _ROC_previous_value;
+  // Here we draw an arrow depending upon the ROC_value
+  // If >100 then big arrow. If >50 then medium arrow, If >10 then small arrow, if <10 then print line
+  // If positive then UP if negative then DOWN.
+  if (_ROC_value > 10)
+  {
+    u8g2.drawTriangle(14, 50, 110, 50, 64, 12);
+  }
+  else if (_ROC_value > 5)
+  {
+    u8g2.drawTriangle(34, 44, 94, 44, 64, 19);
+  }
+  else if (_ROC_value > 2)
+  {
+    u8g2.drawTriangle(54, 35 , 74, 35 , 64, 25);
+  }
+  else if (_ROC_value > -2)
+  {
+    // Middle line
+    u8g2.drawBox(54, 30, 20, 5);
+  }
+  else if (_ROC_value > -5)
+  {
+    u8g2.drawTriangle(54, 25 , 74, 25 , 64, 35);
+  }
+  else if (_ROC_value > -10)
+  {
+    u8g2.drawTriangle(34, 19, 94, 19, 64, 44);
+  }
+  else
+  {
+    u8g2.drawTriangle(14, 12, 110, 12, 64, 50);
+  }
+
+  return (_ROC_value);
+}
+
+float updateIntegral(float _integral_value, float _co2ppm)
+{
+  return (_integral_value);
+}
+
 void updateScreen(int _mode, bool _wificonnect, bool _mqttconnect)
 {
   // This routine draws the basic display with all features
@@ -676,18 +741,27 @@ void updateScreen(int _mode, bool _wificonnect, bool _mqttconnect)
     case 5:
       // This is the case when undefined at start
       u8g2.setCursor(0, 10);
-      u8g2.print(F("RATE OF CHANGE"));
-
-      //      updateROC(ROC_previous_value, co2ppm);
-      //      ROC_previous_value=co2ppm;
+      u8g2.print(F("CHANGE:"));
+      ROC_value = updateROC(ROC_previous_value, co2ppm);
+      u8g2.setCursor(64, 10);
+      u8g2.print(ROC_value, 0);
       checkLEDs(co2ppm, co2High, co2Low);
+      ROC_previous_value = co2ppm;
       break;
 
     case 6:
       // This is the case when undefined at start
       u8g2.setCursor(0, 10);
       u8g2.print(F("INTEGRAL"));
-      checkLEDs(co2ppm, co2High, co2Low);
+
+
+
+      // Want the LEDs to go red when integral is HIGH
+
+      float _integral_value;   // This holds if the lights should be green, yellow or red - not on high or low this time
+      // If integral <50% the green, if <100% then yellow if >100% then red
+
+      checkLEDs(_integral_value, co2High, co2Low);
       break;
 
     case 7:
@@ -761,6 +835,15 @@ void updateScreen(int _mode, bool _wificonnect, bool _mqttconnect)
       }
       checkLEDs(co2ppm, co2High, co2Low);
       break;
+
+    case 97:
+      // This is the case when warm up has been cancelled.
+      // Displays this screen for a bit!
+      u8g2.setCursor(0, 10);
+      u8g2.print(F("Warm Up CANCELLED"));
+      displayMode = EEPROM.read(1);  // After showing - update to mode
+      break;
+
 
     case 98:
       // This is the case when the EEPROM has been saved
@@ -971,13 +1054,23 @@ void longpress(Button2& btn)
 
   unsigned int time = btn.wasPressedFor();
 
-  if (time > 3000) {
-    if (DEBUG_SWITCH == true)
+  if (time > 2000) {
+    if (warmUpFlag == true)
     {
-      Serial.println(F("Start AP Mode to change Config"));
+      // If this is the case then long press during warm up. reset the warm up.
+      warmUpFlag = false;
+      displayMode = 97;
     }
-    //Start the unit in AP mode
-    setup_wifi(true);
+    else
+    {
+      // If this is the case then warmed up so start an Access point.
+      if (DEBUG_SWITCH == true)
+      {
+        Serial.println(F("Start AP Mode to change Config"));
+      }
+      //Start the unit in AP mode
+      setup_wifi(true);
+    }
   }
   else if (time > 300)
   {
@@ -995,7 +1088,7 @@ void longpress(Button2& btn)
         EEPROM.put(20, co2High);
         EEPROM.put(30, co2IntegralMax);
         EEPROM.put(2, WARM_UP_TIME);
-        EEPROM.write(1, displayMode);  // this writes a good value to it
+        //EEPROM.write(1, displayMode);  // this writes a good value to it
         EEPROM.commit();
         displayMode = 99;
       }
@@ -1003,7 +1096,7 @@ void longpress(Button2& btn)
       Serial.print(F("Adjust Flag = "));
       Serial.println(adjust_settings_flag);
     }
-    else
+    else if (displayMode == 1 || displayMode == 3 || displayMode == 4 || displayMode == 5 || displayMode == 6 )
     {
       //Store starting displayMode to EEPROM with press
       EEPROM.write(1, displayMode);  // this writes a good value to it
