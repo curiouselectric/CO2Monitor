@@ -773,25 +773,38 @@ void updateScreen(int _mode, bool _wificonnect, bool _mqttconnect)
       // it has a multipler of 1000, to make the values more managable.
       // Maximum value is 5000 x 1000 = 5000000 = 1000ppm for 83 mins.
       // There are:DISPLAY_UPDATE time in mS between the readings (approx!)
-      integral_value = integral_value + (((co2ppm * (float)DISPLAY_UPDATE) / 1000.0) / 1000.0);
+
+      // Only do this if under the max value. otherwise it rolls around
+      if (  integral_value    <= co2IntegralMax)
+      {
+        integral_value = integral_value + (((co2ppm * (float)DISPLAY_UPDATE) / 1000.0) / 1000.0);
+        u8g2.setCursor(88, 10);
+        u8g2.print(integral_value, 0);
+      }
+      else
+      {
+        // We have gone above the max value so display that (stops roll-over reset).
+        u8g2.setCursor(88, 10);
+        u8g2.print("MAX");
+      }
 
       // If integral <50% the green, if <100% then yellow if >100% then red
       // Draws a status bar at position _x, _y with _height and _width.
       // This is filled up to _progrss (a percent value from 0-100)
       u8g2.drawFrame(10, 25, 100, 10);
+
       percentage = (int)((integral_value / co2IntegralMax) * (float)100);
+
       if (percentage >= 100)
       {
         percentage = 100; // Stops graph going off the scale.
       }
-
       if (percentage > 0)
       {
         u8g2.drawBox(10, 25, percentage, 10);
       }
-      u8g2.setCursor(88, 10);
-      u8g2.print(integral_value, 0);
-
+      
+      // Sort out the LED light colours here....
       if (percentage <= 50)
       {
         checkLEDs(co2Low - 10, co2High, co2Low);
