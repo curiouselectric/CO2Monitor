@@ -803,7 +803,7 @@ void updateScreen(int _mode, bool _wificonnect, bool _mqttconnect)
       {
         u8g2.drawBox(10, 25, percentage, 10);
       }
-      
+
       // Sort out the LED light colours here....
       if (percentage <= 50)
       {
@@ -1115,6 +1115,11 @@ void longpress(Button2& btn)
       // If this is the case then long press during warm up. reset the warm up.
       warmUpFlag = false;
       displayMode = 97;
+    }
+    else if (displayMode == 6)
+    {
+      // In this case we are in the integral mode. Want to reset the integral value with a long press.
+      integral_value = 0;
     }
     else
     {
