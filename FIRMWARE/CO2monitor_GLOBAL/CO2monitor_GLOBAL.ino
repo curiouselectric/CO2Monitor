@@ -734,14 +734,13 @@ void updateScreen(int _mode, bool _wificonnect, bool _mqttconnect)
         {
           graphCalculatedY = starty;
         }
-        u8g2.drawLine(startx + n, starty, startx + n, (int)graphCalculatedY);
+        u8g2.drawLine(startx + sizeOfBuffer - n, starty, startx + sizeOfBuffer - n, (int)graphCalculatedY);
       }
       // Also add two lines - one for the min and one for the max:
       // Draw min line
-      u8g2.drawLine(startx , starty - (int)(((co2Low - graphCO2HeightMinValue) / graphCO2HeightMaxValue)*graphHeight), startx + sizeOfBuffer, starty - (int)(((co2Low - graphCO2HeightMinValue) / graphCO2HeightMaxValue)*graphHeight));
+      u8g2.drawLine(startx , starty - (int)(((co2Low - graphCO2HeightMinValue) / (graphCO2HeightMaxValue - graphCO2HeightMinValue))*graphHeight), startx + sizeOfBuffer, starty - (int)(((co2Low - graphCO2HeightMinValue) / (graphCO2HeightMaxValue - graphCO2HeightMinValue))*graphHeight));
       // Draw max line
-      u8g2.drawLine(startx , starty - (int)(((co2High - graphCO2HeightMinValue) / graphCO2HeightMaxValue)*graphHeight), startx + sizeOfBuffer, starty - (int)(((co2High - graphCO2HeightMinValue) / graphCO2HeightMaxValue)*graphHeight));
-
+      u8g2.drawLine(startx , starty - (int)(((co2High - graphCO2HeightMinValue) / (graphCO2HeightMaxValue - graphCO2HeightMinValue))*graphHeight), startx + sizeOfBuffer, starty - (int)(((co2High - graphCO2HeightMinValue) /(graphCO2HeightMaxValue - graphCO2HeightMinValue))*graphHeight));
       checkLEDs(co2ppm, co2High, co2Low);
       break;
 
